@@ -11,8 +11,6 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
-
-# Telegram Bot Token & Gemini API key from environment
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -51,7 +49,7 @@ def clean_response(text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     return text.strip()
 
-# Set up persistent bot commands
+# Set up persistent bot menu commands
 async def set_bot_commands(application: Application):
     commands = [
         BotCommand("start", "Show the main menu"),
@@ -60,29 +58,26 @@ async def set_bot_commands(application: Application):
     ]
     await application.bot.set_my_commands(commands)
 
-# /start command
+# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! I'm your AI assistant. Use the menu button to access my commands.")
 
-# /translate command
+# Translate command
 async def translate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     if not check_user_limit(user_id):
-        await update.message.reply_text(
-            f"⚠️ You have reached your daily limit of {DAILY_LIMIT} messages. Please try again tomorrow."
-        )
+        await update.message.reply_text(f"⚠️ You have reached your daily limit of {DAILY_LIMIT} messages. Try again tomorrow.")
         return
-
     TRANSLATE_MODE_USERS.add(user_id)
     await update.message.reply_text("🌐 Send me the text you want to translate (English ↔ Khmer):")
 
-# /help command
+# Help command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ℹ️ Instructions:\n"
+        f"ℹ️ Instructions:\n"
         "- Send any message and I will respond.\n"
-        "- Use the /start command or the menu button to show the main options.\n"
-        "- Use the /translate command to enter translation mode.\n"
+        "- Use the /start command or menu button to see options.\n"
+        "- Use /translate to enter translation mode.\n"
         f"- Daily limit: {DAILY_LIMIT} messages per user."
     )
 
@@ -90,7 +85,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def check_user_limit(user_id: str) -> bool:
     now = datetime.now()
     user_data = USER_COUNTERS.get(user_id)
-
     if user_data:
         if now >= user_data["reset_time"]:
             USER_COUNTERS[user_id] = {"count": 0, "reset_time": now + timedelta(days=1)}
@@ -103,14 +97,11 @@ def check_user_limit(user_id: str) -> bool:
         USER_COUNTERS[user_id] = {"count": 0, "reset_time": now + timedelta(days=1)}
         return True
 
-# Save counters to disk
+# Save counters
 def save_counters():
     data = {}
     for u in USER_COUNTERS:
-        data[u] = {
-            "count": USER_COUNTERS[u]["count"],
-            "reset_time": USER_COUNTERS[u]["reset_time"].isoformat()
-        }
+        data[u] = {"count": USER_COUNTERS[u]["count"], "reset_time": USER_COUNTERS[u]["reset_time"].isoformat()}
     with open(COUNTERS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -120,10 +111,7 @@ async def fetch_gemini_reply(user_message: str) -> str:
     try:
         response = await loop.run_in_executor(
             None,
-            lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_message
-            )
+            lambda: client.models.generate_content(model="gemini-2.5-flash", contents=user_message)
         )
         return clean_response(response.text)
     except Exception as e:
@@ -135,11 +123,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     user_message = update.message.text
 
-    # Check daily limit
     if not check_user_limit(user_id):
-        await update.message.reply_text(
-            f"⚠️ You have reached your daily limit of {DAILY_LIMIT} messages. Please try again tomorrow."
-        )
+        await update.message.reply_text(f"⚠️ You have reached your daily limit of {DAILY_LIMIT} messages. Try again tomorrow.")
         return
 
     is_translate_mode = user_id in TRANSLATE_MODE_USERS
@@ -157,15 +142,11 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key in CACHE and not is_translate_mode:
         reply = CACHE[key]
     else:
-        # Prepend translation instruction if in translate mode
         prompt = user_message
         if is_translate_mode:
             prompt = f"Translate this text to Khmer and English: {user_message}"
-
         reply = await fetch_gemini_reply(prompt)
-
         if is_translate_mode:
-            # Exit translation mode after one message
             TRANSLATE_MODE_USERS.remove(user_id)
 
     # Stop typing
@@ -181,19 +162,17 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Register the commands that will appear in the persistent menu
+    # Register handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("translate", translate_command))
-
-    # Handle regular text messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
-    
-    # Set the persistent menu button
-    app.job_queue.run_once(lambda context: set_bot_commands(app), when=5)
 
     print("✅ Bot is running...")
-    app.run_polling()
+
+    # Run polling and schedule setting menu commands in event loop
+    asyncio.get_event_loop().create_task(set_bot_commands(app))
+    app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
