@@ -1,0 +1,4 @@
+.env
+user_counters.json
+__pycache__/
+*.pyc
